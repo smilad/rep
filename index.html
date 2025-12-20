@@ -446,12 +446,37 @@
                 await getUserMedia();
             }
 
+            // Check if peer is ready
+            if (!peer) {
+                log('Peer not initialized. Please wait for connection.', 'error');
+                return;
+            }
+
+            if (!peer.open) {
+                log('Peer not ready. Please wait for connection.', 'error');
+                return;
+            }
+
+            // Require valid media stream for outgoing calls
+            if (!localStream) {
+                log('Cannot make call without media access. Please click "Request Media" and allow camera/microphone access.', 'error');
+                return;
+            }
+
             try {
                 log(`Calling ${peerId}...`, 'info');
                 updateStatus('Calling...', 'waiting');
                 callBtn.disabled = true;
 
-                const call = peer.call(peerId, localStream || null);
+                const call = peer.call(peerId, localStream);
+                
+                if (!call) {
+                    log('Failed to initiate call. Peer may not be ready or peer ID is invalid.', 'error');
+                    callBtn.disabled = false;
+                    updateStatus('Call failed', 'disconnected');
+                    return;
+                }
+
                 currentCall = call;
 
                 call.on('stream', (remoteStream) => {
@@ -481,17 +506,39 @@
         });
 
         answerBtn.addEventListener('click', async () => {
-            if (currentCall) {
-                // Try to get media if not available
-                if (!localStream) {
-                    log('No local media stream. Attempting to get media...', 'info');
-                    await getUserMedia();
+            if (!currentCall) {
+                log('No incoming call to answer', 'error');
+                return;
+            }
+
+            // Try to get media if not available
+            if (!localStream) {
+                log('No local media stream. Attempting to get media...', 'info');
+                await getUserMedia();
+            }
+            
+            // Answer the call - allow answering even without media (receive-only)
+            try {
+                if (localStream) {
+                    currentCall.answer(localStream);
+                    log('Call answered with media', 'success');
+                } else {
+                    // Try to answer with empty stream (receive-only mode)
+                    try {
+                        const emptyStream = new MediaStream();
+                        currentCall.answer(emptyStream);
+                        log('Call answered (receive-only - no local media)', 'info');
+                    } catch (e) {
+                        log('Cannot answer call. Please allow camera/microphone access for full functionality.', 'error');
+                        return;
+                    }
                 }
-                currentCall.answer(localStream || null);
-                log('Call answered', 'success');
+                
                 updateStatus('In call', 'connected');
                 answerBtn.disabled = true;
                 endBtn.disabled = false;
+            } catch (error) {
+                log(`Error answering call: ${error.message}`, 'error');
             }
         });
 

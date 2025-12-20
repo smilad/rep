@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PeerJS WebRTC Call</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 30px;
+            max-width: 900px;
+            width: 100%;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 2em;
+        }
+
+        .status {
+            text-align: center;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 10px;
+            font-weight: 500;
+        }
+
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .status.waiting {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .peer-id-section {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            align-items: center;
+        }
+
+        .peer-id-section input {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        .peer-id-section input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .peer-id-section label {
+            font-weight: 600;
+            color: #555;
+            min-width: 100px;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            flex: 1;
+            min-width: 120px;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            color: white;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-call {
+            background: #28a745;
+        }
+
+        .btn-call:hover:not(:disabled) {
+            background: #218838;
+        }
+
+        .btn-end {
+            background: #dc3545;
+        }
+
+        .btn-end:hover:not(:disabled) {
+            background: #c82333;
+        }
+
+        .btn-answer {
+            background: #17a2b8;
+        }
+
+        .btn-answer:hover:not(:disabled) {
+            background: #138496;
+        }
+
+        .btn-toggle {
+            background: #6c757d;
+        }
+
+        .btn-toggle:hover:not(:disabled) {
+            background: #5a6268;
+        }
+
+        .video-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .video-wrapper {
+            position: relative;
+            background: #000;
+            border-radius: 10px;
+            overflow: hidden;
+            aspect-ratio: 16/9;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .video-label {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .controls {
+            margin-top: 20px;
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .log {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+
+        .log-entry {
+            margin-bottom: 5px;
+            padding: 5px;
+            border-left: 3px solid #667eea;
+            padding-left: 10px;
+        }
+
+        .log-entry.error {
+            border-left-color: #dc3545;
+            color: #dc3545;
+        }
+
+        .log-entry.success {
+            border-left-color: #28a745;
+            color: #28a745;
+        }
+
+        @media (max-width: 768px) {
+            .video-container {
+                grid-template-columns: 1fr;
+            }
+
+            .button-group {
+                flex-direction: column;
+            }
+
+            button {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎥 PeerJS WebRTC Call</h1>
+        
+        <div id="status" class="status disconnected">Disconnected</div>
+        
+        <div class="peer-id-section">
+            <label>Your ID:</label>
+            <input type="text" id="myId" readonly placeholder="Generating ID...">
+        </div>
+        
+        <div class="peer-id-section">
+            <label>Call Peer ID:</label>
+            <input type="text" id="peerId" placeholder="Enter peer ID to call">
+        </div>
+        
+        <div class="button-group">
+            <button id="callBtn" class="btn-call" disabled>Call</button>
+            <button id="answerBtn" class="btn-answer" disabled>Answer</button>
+            <button id="endBtn" class="btn-end" disabled>End Call</button>
+            <button id="toggleVideoBtn" class="btn-toggle" disabled>Toggle Video</button>
+            <button id="toggleAudioBtn" class="btn-toggle" disabled>Toggle Audio</button>
+        </div>
+        
+        <div class="video-container">
+            <div class="video-wrapper">
+                <video id="localVideo" autoplay muted playsinline></video>
+                <div class="video-label">You</div>
+            </div>
+            <div class="video-wrapper">
+                <video id="remoteVideo" autoplay playsinline></video>
+                <div class="video-label">Remote</div>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <div id="log" class="log"></div>
+        </div>
+    </div>
+
+    <script>
+        let peer = null;
+        let localStream = null;
+        let currentCall = null;
+        let isVideoEnabled = true;
+        let isAudioEnabled = true;
+
+        const myIdInput = document.getElementById('myId');
+        const peerIdInput = document.getElementById('peerId');
+        const callBtn = document.getElementById('callBtn');
+        const answerBtn = document.getElementById('answerBtn');
+        const endBtn = document.getElementById('endBtn');
+        const toggleVideoBtn = document.getElementById('toggleVideoBtn');
+        const toggleAudioBtn = document.getElementById('toggleAudioBtn');
+        const localVideo = document.getElementById('localVideo');
+        const remoteVideo = document.getElementById('remoteVideo');
+        const statusDiv = document.getElementById('status');
+        const logDiv = document.getElementById('log');
+
+        function log(message, type = 'info') {
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(message);
+        }
+
+        function updateStatus(text, className) {
+            statusDiv.textContent = text;
+            statusDiv.className = `status ${className}`;
+        }
+
+        async function initializePeer() {
+            try {
+                // Initialize PeerJS - using a random ID
+                peer = new Peer({
+                    host: 'peerjs-server.herokuapp.com',
+                    port: 443,
+                    path: '/',
+                    secure: true,
+                    config: {
+                        iceServers: [
+                            { urls: 'stun:stun.l.google.com:19302' },
+                            { urls: 'stun:stun1.l.google.com:19302' }
+                        ]
+                    }
+                });
+
+                peer.on('open', (id) => {
+                    myIdInput.value = id;
+                    updateStatus('Connected - Ready to call', 'connected');
+                    callBtn.disabled = false;
+                    log(`Connected with ID: ${id}`, 'success');
+                });
+
+                peer.on('error', (err) => {
+                    log(`Peer error: ${err.message}`, 'error');
+                    updateStatus('Connection Error', 'disconnected');
+                });
+
+                peer.on('call', (call) => {
+                    log('Incoming call...', 'info');
+                    updateStatus('Incoming call...', 'waiting');
+                    answerBtn.disabled = false;
+                    currentCall = call;
+
+                    call.on('stream', (remoteStream) => {
+                        remoteVideo.srcObject = remoteStream;
+                        log('Remote stream received', 'success');
+                        updateStatus('In call', 'connected');
+                    });
+
+                    call.on('close', () => {
+                        log('Call ended', 'info');
+                        updateStatus('Call ended', 'disconnected');
+                        remoteVideo.srcObject = null;
+                        endCall();
+                    });
+
+                    call.on('error', (err) => {
+                        log(`Call error: ${err.message}`, 'error');
+                    });
+                });
+
+                // Get user media
+                await getUserMedia();
+            } catch (error) {
+                log(`Initialization error: ${error.message}`, 'error');
+                updateStatus('Initialization failed', 'disconnected');
+            }
+        }
+
+        async function getUserMedia() {
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({
+                    video: true,
+                    audio: true
+                });
+                localVideo.srcObject = localStream;
+                log('Local media stream obtained', 'success');
+                toggleVideoBtn.disabled = false;
+                toggleAudioBtn.disabled = false;
+            } catch (error) {
+                log(`Error accessing media devices: ${error.message}`, 'error');
+                updateStatus('Media access denied', 'disconnected');
+            }
+        }
+
+        callBtn.addEventListener('click', async () => {
+            const peerId = peerIdInput.value.trim();
+            if (!peerId) {
+                log('Please enter a peer ID', 'error');
+                return;
+            }
+
+            try {
+                log(`Calling ${peerId}...`, 'info');
+                updateStatus('Calling...', 'waiting');
+                callBtn.disabled = true;
+
+                const call = peer.call(peerId, localStream);
+                currentCall = call;
+
+                call.on('stream', (remoteStream) => {
+                    remoteVideo.srcObject = remoteStream;
+                    log('Call connected', 'success');
+                    updateStatus('In call', 'connected');
+                    endBtn.disabled = false;
+                });
+
+                call.on('close', () => {
+                    log('Call ended', 'info');
+                    updateStatus('Call ended', 'disconnected');
+                    remoteVideo.srcObject = null;
+                    endCall();
+                });
+
+                call.on('error', (err) => {
+                    log(`Call error: ${err.message}`, 'error');
+                    updateStatus('Call failed', 'disconnected');
+                    endCall();
+                });
+            } catch (error) {
+                log(`Error making call: ${error.message}`, 'error');
+                updateStatus('Call failed', 'disconnected');
+                callBtn.disabled = false;
+            }
+        });
+
+        answerBtn.addEventListener('click', () => {
+            if (currentCall) {
+                currentCall.answer(localStream);
+                log('Call answered', 'success');
+                updateStatus('In call', 'connected');
+                answerBtn.disabled = true;
+                endBtn.disabled = false;
+            }
+        });
+
+        endBtn.addEventListener('click', () => {
+            endCall();
+        });
+
+        function endCall() {
+            if (currentCall) {
+                currentCall.close();
+                currentCall = null;
+            }
+            remoteVideo.srcObject = null;
+            callBtn.disabled = false;
+            answerBtn.disabled = false;
+            endBtn.disabled = true;
+            updateStatus('Ready to call', 'connected');
+            log('Call ended', 'info');
+        }
+
+        toggleVideoBtn.addEventListener('click', () => {
+            if (localStream) {
+                const videoTrack = localStream.getVideoTracks()[0];
+                if (videoTrack) {
+                    isVideoEnabled = !isVideoEnabled;
+                    videoTrack.enabled = isVideoEnabled;
+                    log(`Video ${isVideoEnabled ? 'enabled' : 'disabled'}`, 'info');
+                    toggleVideoBtn.textContent = isVideoEnabled ? 'Toggle Video' : 'Enable Video';
+                }
+            }
+        });
+
+        toggleAudioBtn.addEventListener('click', () => {
+            if (localStream) {
+                const audioTrack = localStream.getAudioTracks()[0];
+                if (audioTrack) {
+                    isAudioEnabled = !isAudioEnabled;
+                    audioTrack.enabled = isAudioEnabled;
+                    log(`Audio ${isAudioEnabled ? 'enabled' : 'disabled'}`, 'info');
+                    toggleAudioBtn.textContent = isAudioEnabled ? 'Toggle Audio' : 'Enable Audio';
+                }
+            }
+        });
+
+        // Initialize on page load
+        initializePeer();
+    </script>
+</body>
+</html>
+

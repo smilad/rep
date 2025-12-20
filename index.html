@@ -260,6 +260,7 @@
             <button id="endBtn" class="btn-end" disabled>End Call</button>
             <button id="toggleVideoBtn" class="btn-toggle" disabled>Toggle Video</button>
             <button id="toggleAudioBtn" class="btn-toggle" disabled>Toggle Audio</button>
+            <button id="requestMediaBtn" class="btn-toggle">Request Media</button>
         </div>
         
         <div class="video-container">
@@ -292,6 +293,7 @@
         const endBtn = document.getElementById('endBtn');
         const toggleVideoBtn = document.getElementById('toggleVideoBtn');
         const toggleAudioBtn = document.getElementById('toggleAudioBtn');
+        const requestMediaBtn = document.getElementById('requestMediaBtn');
         const localVideo = document.getElementById('localVideo');
         const remoteVideo = document.getElementById('remoteVideo');
         const statusDiv = document.getElementById('status');
@@ -314,11 +316,27 @@
         async function initializePeer() {
             try {
                 // Initialize PeerJS - using a random ID
+                // Try multiple PeerJS servers as fallback
+                const peerConfigs = [
+                    {
+                        host: '0.peerjs.com',
+                        port: 443,
+                        path: '/',
+                        secure: true
+                    },
+                    {
+                        host: 'peerjs-server.herokuapp.com',
+                        port: 443,
+                        path: '/',
+                        secure: true
+                    }
+                ];
+
+                let config = peerConfigs[0];
+                log(`Connecting to PeerJS server: ${config.host}`, 'info');
+
                 peer = new Peer({
-                    host: 'peerjs-server.herokuapp.com',
-                    port: 443,
-                    path: '/',
-                    secure: true,
+                    ...config,
                     config: {
                         iceServers: [
                             { urls: 'stun:stun.l.google.com:19302' },
@@ -335,8 +353,17 @@
                 });
 
                 peer.on('error', (err) => {
-                    log(`Peer error: ${err.message}`, 'error');
-                    updateStatus('Connection Error', 'disconnected');
+                    const errorMsg = err.message || err.toString();
+                    log(`Peer error: ${errorMsg}`, 'error');
+                    
+                    // Provide helpful error messages
+                    if (errorMsg.includes('socket') || errorMsg.includes('connection')) {
+                        log('Tip: The PeerJS server might be unavailable. Try refreshing the page.', 'info');
+                    } else if (errorMsg.includes('ID')) {
+                        log('Tip: There might be an ID conflict. The page will auto-retry.', 'info');
+                    }
+                    
+                    updateStatus('Connection Error - Check console', 'disconnected');
                 });
 
                 peer.on('call', (call) => {
@@ -382,9 +409,28 @@
                 toggleVideoBtn.disabled = false;
                 toggleAudioBtn.disabled = false;
             } catch (error) {
-                log(`Error accessing media devices: ${error.message}`, 'error');
-                updateStatus('Media access denied', 'disconnected');
+                const errorMsg = error.message || error.toString();
+                log(`Error accessing media devices: ${errorMsg}`, 'error');
+                
+                // Provide helpful instructions based on error type
+                if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+                    log('Tip: Please allow camera and microphone access in your browser settings.', 'info');
+                    log('Tip: Click the lock icon in your browser address bar to manage permissions.', 'info');
+                } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+                    log('Tip: No camera or microphone found. Please connect a device.', 'info');
+                } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
+                    log('Tip: Camera or microphone is being used by another application.', 'info');
+                }
+                
+                updateStatus('Media access needed - Click "Request Media" to retry', 'waiting');
+                // Don't block the app - allow calls without local stream
+                log('Note: You can still receive calls, but won\'t be able to send video/audio.', 'info');
             }
+        }
+
+        async function retryGetUserMedia() {
+            log('Retrying media access...', 'info');
+            await getUserMedia();
         }
 
         callBtn.addEventListener('click', async () => {
@@ -394,12 +440,18 @@
                 return;
             }
 
+            // Try to get media if not available
+            if (!localStream) {
+                log('No local media stream. Attempting to get media...', 'info');
+                await getUserMedia();
+            }
+
             try {
                 log(`Calling ${peerId}...`, 'info');
                 updateStatus('Calling...', 'waiting');
                 callBtn.disabled = true;
 
-                const call = peer.call(peerId, localStream);
+                const call = peer.call(peerId, localStream || null);
                 currentCall = call;
 
                 call.on('stream', (remoteStream) => {
@@ -428,9 +480,14 @@
             }
         });
 
-        answerBtn.addEventListener('click', () => {
+        answerBtn.addEventListener('click', async () => {
             if (currentCall) {
-                currentCall.answer(localStream);
+                // Try to get media if not available
+                if (!localStream) {
+                    log('No local media stream. Attempting to get media...', 'info');
+                    await getUserMedia();
+                }
+                currentCall.answer(localStream || null);
                 log('Call answered', 'success');
                 updateStatus('In call', 'connected');
                 answerBtn.disabled = true;
@@ -477,6 +534,12 @@
                     toggleAudioBtn.textContent = isAudioEnabled ? 'Toggle Audio' : 'Enable Audio';
                 }
             }
+        });
+
+        requestMediaBtn.addEventListener('click', async () => {
+            requestMediaBtn.disabled = true;
+            await retryGetUserMedia();
+            requestMediaBtn.disabled = false;
         });
 
         // Initialize on page load

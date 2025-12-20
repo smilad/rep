@@ -424,14 +424,20 @@
         
         <div id="status" class="status disconnected">Disconnected</div>
         
-        <div class="peer-id-section">
-            <label>Your ID:</label>
-            <input type="text" id="myId" readonly placeholder="Generating ID...">
+        <div class="peer-id-section" id="usernameSection">
+            <label>Your Username:</label>
+            <input type="text" id="usernameInput" placeholder="Enter your username" maxlength="20">
+            <button id="setUsernameBtn" class="btn-call" style="min-width: 100px; flex: 0;">Connect</button>
+        </div>
+        
+        <div class="peer-id-section" id="myIdSection" style="display: none;">
+            <label>Your Username:</label>
+            <input type="text" id="myId" readonly>
         </div>
         
         <div class="peer-id-section">
-            <label>Call Peer ID:</label>
-            <input type="text" id="peerId" placeholder="Enter peer ID to call">
+            <label>Call Username:</label>
+            <input type="text" id="peerId" placeholder="Enter username to call">
         </div>
         
         <div class="button-group">
@@ -441,7 +447,7 @@
             <button id="toggleVideoBtn" class="btn-toggle" disabled>Toggle Video</button>
             <button id="toggleAudioBtn" class="btn-toggle" disabled>Toggle Audio</button>
             <button id="requestMediaBtn" class="btn-toggle">Request Media</button>
-            <button id="connectChatBtn" class="btn-toggle">Connect Chat</button>
+            <button id="connectChatBtn" class="btn-toggle" disabled>Connect Chat</button>
         </div>
         
         <div class="video-container">
@@ -481,7 +487,11 @@
         let isAudioEnabled = true;
         let isChatVisible = true;
 
+        const usernameInput = document.getElementById('usernameInput');
+        const setUsernameBtn = document.getElementById('setUsernameBtn');
         const myIdInput = document.getElementById('myId');
+        const myIdSection = document.getElementById('myIdSection');
+        const usernameSection = document.getElementById('usernameSection');
         const peerIdInput = document.getElementById('peerId');
         const callBtn = document.getElementById('callBtn');
         const answerBtn = document.getElementById('answerBtn');
@@ -513,9 +523,26 @@
             statusDiv.className = `status ${className}`;
         }
 
-        async function initializePeer() {
+        async function initializePeer(username) {
+            if (!username || username.trim() === '') {
+                log('Please enter a username', 'error');
+                return;
+            }
+
+            username = username.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+            
+            if (username.length < 3) {
+                log('Username must be at least 3 characters', 'error');
+                return;
+            }
+
+            if (username.length > 20) {
+                log('Username must be 20 characters or less', 'error');
+                return;
+            }
+
             try {
-                // Initialize PeerJS - using a random ID
+                // Initialize PeerJS - using username as custom ID
                 // Try multiple PeerJS servers as fallback
                 const peerConfigs = [
                     {
@@ -525,17 +552,17 @@
                         secure: true
                     },
                     {
-                        host: 'peerjs-server.herokuapp.com',
-                        port: 443,
-                        path: '/',
+                    host: 'peerjs-server.herokuapp.com',
+                    port: 443,
+                    path: '/',
                         secure: true
                     }
                 ];
 
                 let config = peerConfigs[0];
-                log(`Connecting to PeerJS server: ${config.host}`, 'info');
+                log(`Connecting as "${username}" to PeerJS server: ${config.host}`, 'info');
 
-                peer = new Peer({
+                peer = new Peer(username, {
                     ...config,
                     config: {
                         iceServers: [
@@ -547,9 +574,14 @@
 
                 peer.on('open', (id) => {
                     myIdInput.value = id;
+                    usernameSection.style.display = 'none';
+                    myIdSection.style.display = 'flex';
                     updateStatus('Connected - Ready to call', 'connected');
                     callBtn.disabled = false;
-                    log(`Connected with ID: ${id}`, 'success');
+                    connectChatBtn.disabled = false;
+                    setUsernameBtn.disabled = false;
+                    setUsernameBtn.textContent = 'Connect';
+                    log(`Connected as "${id}"`, 'success');
                 });
 
                 peer.on('error', (err) => {
@@ -560,11 +592,22 @@
                     // Provide helpful error messages based on error type
                     if (errorMsg.includes('socket') || errorMsg.includes('connection') || errorType === 'server-error') {
                         log('Tip: The PeerJS server might be unavailable. Try refreshing the page.', 'info');
-                    } else if (errorMsg.includes('ID') || errorType === 'peer-unavailable') {
-                        log('Tip: The peer ID might be invalid or the peer is not connected.', 'info');
+                    } else if (errorMsg.includes('ID') || errorType === 'peer-unavailable' || errorType === 'unavailable-id') {
+                        if (errorType === 'unavailable-id') {
+                            log('Error: This username is already taken. Please choose a different username.', 'error');
+                            usernameSection.style.display = 'flex';
+                            myIdSection.style.display = 'none';
+                            setUsernameBtn.disabled = false;
+                            if (peer) {
+                                peer.destroy();
+                                peer = null;
+                            }
+                        } else {
+                            log('Tip: The username might be invalid or the peer is not connected.', 'info');
+                        }
                     } else if (errorMsg.includes('Could not connect to peer') || errorType === 'peer-unavailable') {
                         log('Tip: The other peer might not be online or not connected to the server.', 'info');
-                        log('Tip: Make sure the peer ID is correct and the other person is ready.', 'info');
+                        log('Tip: Make sure the username is correct and the other person is ready.', 'info');
                         log('Tip: Both peers need to be connected to the PeerJS server.', 'info');
                     } else if (errorType === 'network') {
                         log('Tip: Network connectivity issue. Check your internet connection.', 'info');
@@ -775,9 +818,9 @@
         chatSendBtn.addEventListener('click', sendChatMessage);
 
         callBtn.addEventListener('click', async () => {
-            const peerId = peerIdInput.value.trim();
+            const peerId = peerIdInput.value.trim().toLowerCase();
             if (!peerId) {
-                log('Please enter a peer ID', 'error');
+                log('Please enter a username', 'error');
                 return;
             }
 
@@ -812,7 +855,7 @@
                 const call = peer.call(peerId, localStream);
                 
                 if (!call) {
-                    log('Failed to initiate call. Peer may not be ready or peer ID is invalid.', 'error');
+                    log('Failed to initiate call. Peer may not be ready or username is invalid.', 'error');
                     callBtn.disabled = false;
                     updateStatus('Call failed', 'disconnected');
                     return;
@@ -855,7 +898,7 @@
                     // Provide troubleshooting tips for call errors
                     if (errorMsg.includes('Could not connect to peer') || errorMsg.includes('peer-unavailable')) {
                         log('Troubleshooting:', 'info');
-                        log('1. Verify the peer ID is correct (copy-paste to avoid typos)', 'info');
+                        log('1. Verify the username is correct (copy-paste to avoid typos)', 'info');
                         log('2. Make sure the other peer is online and connected', 'info');
                         log('3. Both peers need to be on the same PeerJS server', 'info');
                         log('4. Try refreshing both browsers and reconnecting', 'info');
@@ -875,7 +918,7 @@
                 log(`Error making call: ${errorMsg}`, 'error');
                 
                 if (errorMsg.includes('peer') || errorMsg.includes('call')) {
-                    log('Tip: Make sure the peer ID is correct and the other peer is ready.', 'info');
+                    log('Tip: Make sure the username is correct and the other peer is ready.', 'info');
                 }
                 
                 updateStatus('Call failed - Check logs for details', 'disconnected');
@@ -898,7 +941,7 @@
             // Answer the call - allow answering even without media (receive-only)
             try {
                 if (localStream) {
-                    currentCall.answer(localStream);
+                currentCall.answer(localStream);
                     log('Call answered with media', 'success');
                 } else {
                     // Try to answer with empty stream (receive-only mode)
@@ -979,9 +1022,9 @@
         });
 
         connectChatBtn.addEventListener('click', () => {
-            const peerId = peerIdInput.value.trim();
+            const peerId = peerIdInput.value.trim().toLowerCase();
             if (!peerId) {
-                log('Please enter a peer ID to connect chat', 'error');
+                log('Please enter a username to connect chat', 'error');
                 return;
             }
             
@@ -998,8 +1041,27 @@
             establishDataConnection(peerId);
         });
 
-        // Initialize on page load
-        initializePeer();
+        setUsernameBtn.addEventListener('click', async () => {
+            const username = usernameInput.value.trim();
+            if (!username) {
+                log('Please enter a username', 'error');
+                return;
+            }
+            
+            setUsernameBtn.disabled = true;
+            setUsernameBtn.textContent = 'Connecting...';
+            await initializePeer(username);
+            setUsernameBtn.textContent = 'Connect';
+        });
+
+        usernameInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !setUsernameBtn.disabled) {
+                setUsernameBtn.click();
+            }
+        });
+
+        // Initialize on page load - wait for username
+        updateStatus('Enter your username to connect', 'waiting');
     </script>
 </body>
 </html>

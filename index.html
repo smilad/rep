@@ -223,6 +223,53 @@
             color: #28a745;
         }
 
+        .permission-alert {
+            display: none;
+            background: #fff3cd;
+            border: 2px solid #ffc107;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            color: #856404;
+        }
+
+        .permission-alert.show {
+            display: block;
+        }
+
+        .permission-alert h3 {
+            margin-top: 0;
+            margin-bottom: 15px;
+            color: #856404;
+            font-size: 1.2em;
+        }
+
+        .permission-alert ol {
+            margin: 10px 0;
+            padding-left: 25px;
+        }
+
+        .permission-alert li {
+            margin: 8px 0;
+            line-height: 1.6;
+        }
+
+        .permission-alert .close-btn {
+            float: right;
+            background: #856404;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            padding: 5px 15px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-top: -5px;
+        }
+
+        .permission-alert .close-btn:hover {
+            background: #6c5500;
+        }
+
         @media (max-width: 768px) {
             .video-container {
                 grid-template-columns: 1fr;
@@ -241,6 +288,24 @@
 <body>
     <div class="container">
         <h1>🎥 FARAZ WebRTC Call</h1>
+        
+        <div id="permissionAlert" class="permission-alert">
+            <button class="close-btn" onclick="document.getElementById('permissionAlert').classList.remove('show')">✕</button>
+            <h3>🔒 Camera & Microphone Permission Required</h3>
+            <p><strong>To use this app, you need to grant camera and microphone permissions:</strong></p>
+            <ol>
+                <li><strong>Look for the lock icon (🔒) or camera icon</strong> in your browser's address bar</li>
+                <li><strong>Click on it</strong> to open site permissions</li>
+                <li><strong>Set Camera and Microphone to "Allow"</strong></li>
+                <li><strong>Refresh the page</strong> or click "Request Media" button again</li>
+            </ol>
+            <p><strong>Browser-specific instructions:</strong></p>
+            <ul style="margin-top: 10px; padding-left: 25px;">
+                <li><strong>Chrome/Edge:</strong> Click the lock icon → Site settings → Allow Camera & Microphone</li>
+                <li><strong>Firefox:</strong> Click the lock icon → Permissions → Allow Camera & Microphone</li>
+                <li><strong>Safari:</strong> Safari → Settings → Websites → Camera/Microphone → Allow</li>
+            </ul>
+        </div>
         
         <div id="status" class="status disconnected">Disconnected</div>
         
@@ -354,13 +419,20 @@
 
                 peer.on('error', (err) => {
                     const errorMsg = err.message || err.toString();
+                    const errorType = err.type || '';
                     log(`Peer error: ${errorMsg}`, 'error');
                     
-                    // Provide helpful error messages
-                    if (errorMsg.includes('socket') || errorMsg.includes('connection')) {
+                    // Provide helpful error messages based on error type
+                    if (errorMsg.includes('socket') || errorMsg.includes('connection') || errorType === 'server-error') {
                         log('Tip: The PeerJS server might be unavailable. Try refreshing the page.', 'info');
-                    } else if (errorMsg.includes('ID')) {
-                        log('Tip: There might be an ID conflict. The page will auto-retry.', 'info');
+                    } else if (errorMsg.includes('ID') || errorType === 'peer-unavailable') {
+                        log('Tip: The peer ID might be invalid or the peer is not connected.', 'info');
+                    } else if (errorMsg.includes('Could not connect to peer') || errorType === 'peer-unavailable') {
+                        log('Tip: The other peer might not be online or not connected to the server.', 'info');
+                        log('Tip: Make sure the peer ID is correct and the other person is ready.', 'info');
+                        log('Tip: Both peers need to be connected to the PeerJS server.', 'info');
+                    } else if (errorType === 'network') {
+                        log('Tip: Network connectivity issue. Check your internet connection.', 'info');
                     }
                     
                     updateStatus('Connection Error - Check console', 'disconnected');
@@ -408,12 +480,16 @@
                 log('Local media stream obtained', 'success');
                 toggleVideoBtn.disabled = false;
                 toggleAudioBtn.disabled = false;
+                // Hide permission alert if it was showing
+                document.getElementById('permissionAlert').classList.remove('show');
             } catch (error) {
                 const errorMsg = error.message || error.toString();
                 log(`Error accessing media devices: ${errorMsg}`, 'error');
                 
                 // Provide helpful instructions based on error type
                 if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+                    // Show prominent permission alert
+                    document.getElementById('permissionAlert').classList.add('show');
                     log('Tip: Please allow camera and microphone access in your browser settings.', 'info');
                     log('Tip: Click the lock icon in your browser address bar to manage permissions.', 'info');
                 } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
@@ -479,7 +555,18 @@
 
                 currentCall = call;
 
+                // Set a timeout for connection (15 seconds)
+                let callTimeout = setTimeout(() => {
+                    if (currentCall === call && !remoteVideo.srcObject) {
+                        log('Call timeout: No response from peer after 15 seconds', 'error');
+                        log('Tip: The peer might be offline, not connected, or behind a restrictive firewall.', 'info');
+                        updateStatus('Call timeout - Peer not responding', 'disconnected');
+                        endCall();
+                    }
+                }, 15000);
+
                 call.on('stream', (remoteStream) => {
+                    clearTimeout(callTimeout);
                     remoteVideo.srcObject = remoteStream;
                     log('Call connected', 'success');
                     updateStatus('In call', 'connected');
@@ -494,13 +581,37 @@
                 });
 
                 call.on('error', (err) => {
-                    log(`Call error: ${err.message}`, 'error');
-                    updateStatus('Call failed', 'disconnected');
+                    clearTimeout(callTimeout);
+                    const errorMsg = err.message || err.toString();
+                    log(`Call error: ${errorMsg}`, 'error');
+                    
+                    // Provide troubleshooting tips for call errors
+                    if (errorMsg.includes('Could not connect to peer') || errorMsg.includes('peer-unavailable')) {
+                        log('Troubleshooting:', 'info');
+                        log('1. Verify the peer ID is correct (copy-paste to avoid typos)', 'info');
+                        log('2. Make sure the other peer is online and connected', 'info');
+                        log('3. Both peers need to be on the same PeerJS server', 'info');
+                        log('4. Try refreshing both browsers and reconnecting', 'info');
+                        log('5. Check if firewall/NAT is blocking WebRTC connections', 'info');
+                    } else if (errorMsg.includes('network') || errorMsg.includes('connection')) {
+                        log('Tip: Network issue detected. Check your internet connection.', 'info');
+                    } else if (errorMsg.includes('ICE') || errorMsg.includes('candidate')) {
+                        log('Tip: WebRTC connection failed. This might be a firewall/NAT issue.', 'info');
+                        log('Tip: Try using a different network or disable VPN if active.', 'info');
+                    }
+                    
+                    updateStatus('Call failed - Check logs for details', 'disconnected');
                     endCall();
                 });
             } catch (error) {
-                log(`Error making call: ${error.message}`, 'error');
-                updateStatus('Call failed', 'disconnected');
+                const errorMsg = error.message || error.toString();
+                log(`Error making call: ${errorMsg}`, 'error');
+                
+                if (errorMsg.includes('peer') || errorMsg.includes('call')) {
+                    log('Tip: Make sure the peer ID is correct and the other peer is ready.', 'info');
+                }
+                
+                updateStatus('Call failed - Check logs for details', 'disconnected');
                 callBtn.disabled = false;
             }
         });

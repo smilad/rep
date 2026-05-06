@@ -1,0 +1,14 @@
+services:
+  xray:
+    build: .
+    container_name: xray-vless
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./xray-data:/etc/xray
+    environment:
+      SERVER_HOST: ${SERVER_HOST:-YOUR_SERVER_IP}
+      PORT: 80
+      WS_PATH: /ray
+      # UUID: paste-your-own-or-leave-empty-to-auto-generate
